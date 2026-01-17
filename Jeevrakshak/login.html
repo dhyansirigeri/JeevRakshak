@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jeevrakshak Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="login.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <script>
+        // --- CONFIGURATION ---
+        const API_URL = 'http://localhost:3000/api'; // Assuming your server runs on port 3000
+
+        function showForm(formId) {
+            // Hide all form/choice containers first
+            document.querySelectorAll('.form-container, #choice-container, #register-container, #patient-login-container').forEach(container => {
+                container.style.display = 'none';
+                container.classList.remove('active-form'); // Remove animation class
+            });
+            // Show the requested container
+            const activeForm = document.getElementById(formId);
+            activeForm.style.display = 'block';
+
+            // Small timeout to allow display:block to apply before adding opacity class for transition
+            setTimeout(() => {
+                activeForm.classList.add('active-form');
+            }, 10);
+
+            // Reset status elements
+            if (document.getElementById('patient-login-location-status')) {
+                document.getElementById('patient-login-location-status').textContent = 'Location not set.';
+            }
+            if (document.getElementById('patient-reg-location-status')) {
+                document.getElementById('patient-reg-location-status').textContent = 'Location not set.';
+            }
+            // Reset hospital registration status element
+            if (document.getElementById('hosp-reg-location-status')) {
+                document.getElementById('hosp-reg-location-status').innerHTML = 'Location required *';
+                const latEl = document.getElementById('hosp-lat');
+                const lngEl = document.getElementById('hosp-lng');
+                if (latEl) latEl.value = '';
+                if (lngEl) lngEl.value = '';
+            }
+        }
+
+        function redirectToDashboard(role, username, token) {
+            localStorage.setItem('auth_token', token);
+            // Location is no longer stored here for hospital
+            if (role === 'patient') {
+                localStorage.setItem('current_patient_name', username);
+                window.location.href = 'patient.html';
+            } else if (role === 'hospital') {
+                localStorage.setItem('current_admin_id', username);
+                window.location.href = 'hospital.html';
+            } else if (role === 'admin') {
+                // If you have an admin dashboard
+                window.location.href = 'admin.html';
+            }
+        }
+
+        // --- GEOLOCATION HELPER FUNCTIONS ---
+        // --- GEOLOCATION HELPER FUNCTIONS ---
+        function getPatientLocation(statusId) {
+            const statusElement = document.getElementById(statusId);
+
+            if (!statusElement) {
+                console.error(`Status element with ID ${statusId} not found.`);
+                return;
+            }
+
+            statusElement.innerHTML = 'Fetching location... <i class="fas fa-spinner fa-spin"></i>';
+
+            if (!navigator.geolocation) {
+                // FALLBACK IF GEOLOCATION IS NOT SUPPORTED
+                showLocationModal(
+                    "Geolocation Not Supported",
+                    "Your browser does not support automatic location detection.",
+                    (accepted) => {
+                        if (accepted) {
+                            localStorage.setItem('patient_latitude', 12.9716);
+                            localStorage.setItem('patient_longitude', 77.5946);
+                            statusElement.innerHTML = `<i class="fas fa-check-circle" style="color:#ffd43b;"></i> Simulated Location set! (12.9716, 77.5946)`;
+                        } else {
+                            statusElement.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:#ff6b6b;"></i> Location access required.';
+                        }
+                    }
+                );
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+
+                    // Store location in localStorage for use by patient.js
+                    localStorage.setItem('patient_latitude', lat);
+                    localStorage.setItem('patient_longitude', lng);
+
+                    statusElement.innerHTML = `<i class="fas fa-check-circle" style="color:#51cf66;"></i> Location set! (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+                },
+                (error) => {
+                    let errorMessage = 'Location access denied or failed.';
+                    let title = "Location Access Failed";
+
+                    if (error.code === error.PERMISSION_DENIED) {
+                        errorMessage = 'Access denied. Please enable location services.';
+                        title = "Permission Denied";
+                    } else if (error.code === error.POSITION_UNAVAILABLE) {
+                        errorMessage = 'Position unavailable. Check signal.';
+                    }
+
+                    console.error("Geolocation Error:", error);
+
+                    // SHOW CUSTOM MODAL INSTEAD OF CONFIRM
+                    showLocationModal(
+                        title,
+                        `${errorMessage}<br><br>Would you like to use a simulated location for testing purposes?`,
+                        (accepted) => {
+                            if (accepted) {
+                                localStorage.setItem('patient_latitude', 12.9716);
+                                localStorage.setItem('patient_longitude', 77.5946);
+                                document.getElementById(statusId).innerHTML = `<i class="fas fa-check-circle" style="color:#ffd43b;"></i> Simulated Location set! (12.9716, 77.5946)`;
+                            } else {
+                                statusElement.innerHTML = `<i class="fas fa-exclamation-triangle" style="color:#ff6b6b;"></i> Location Access Denied`;
+                            }
+                        }
+                    );
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
+        // --- CUSTOM MODAL LOGIC ---
+        let modalCallback = null;
+
+        function showLocationModal(title, message, callback) {
+            const modal = document.getElementById('location-permission-modal');
+            if (!modal) return;
+
+            document.getElementById('loc-modal-title').textContent = title;
+            document.getElementById('loc-modal-msg').innerHTML = message;
+
+            modalCallback = callback;
+            modal.style.display = 'flex';
+        }
+
+        function handleModalResponse(accepted) {
+            const modal = document.getElementById('location-permission-modal');
+            if (modal) modal.style.display = 'none';
+
+            if (modalCallback) {
+                modalCallback(accepted);
+                modalCallback = null;
+            }
+        }
+
+        // --- GEOLOCATION HELPER FUNCTIONS FOR HOSPITAL REGISTRATION ---
+        function getHospitalLocation(latId, lngId) {
+            const latElement = document.getElementById(latId);
+            const lngElement = document.getElementById(lngId);
+            // Use an ID that is specific to the registration form for status
+            const statusId = 'hosp-reg-location-status';
+            const statusElement = document.getElementById(statusId);
+
+            if (!latElement || !lngElement || !statusElement) {
+                console.error(`One or more hospital location elements not found.`);
+                return;
+            }
+
+            statusElement.innerHTML = 'Fetching location... <i class="fas fa-spinner fa-spin"></i>';
+
+            if (!navigator.geolocation) {
+                statusElement.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:#ff6b6b;"></i> Geolocation is not supported.';
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+
+                    latElement.value = lat;
+                    lngElement.value = lng;
+                    statusElement.innerHTML = `<i class="fas fa-check-circle" style="color:#51cf66;"></i> Location set! (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+                },
+                (error) => {
+                    let errorMessage = 'Location access denied or failed.';
+                    if (error.code === error.PERMISSION_DENIED) {
+                        errorMessage = 'Permission Denied. Please enable location services.';
+                    } else if (error.code === error.POSITION_UNAVAILABLE) {
+                        errorMessage = 'Position unavailable. Check your connection or signal.';
+                    }
+
+                    statusElement.innerHTML = `<i class="fas fa-exclamation-triangle" style="color:#ff6b6b;"></i> ${errorMessage}`;
+                    console.error("Geolocation Error:", error);
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
+
+        // --- HANDLER FUNCTIONS ---
+
+        // 1. Patient Registration Handler
+        async function handlePatientRegister(event) {
+            event.preventDefault();
+            const username = document.getElementById('patient-reg-name').value.trim();
+            const password = document.getElementById('patient-reg-password').value;
+            const lat = localStorage.getItem('patient_latitude');
+            const lng = localStorage.getItem('patient_longitude');
+
+            if (!lat || !lng) {
+                alert('Please click "Get My Location" before signing up.');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/register/patient`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username,
+                        password,
+                        location: { lat: parseFloat(lat), lng: parseFloat(lng) }
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    alert(`Registration successful! Welcome, ${data.username}.`);
+                    redirectToDashboard('patient', data.username, data.token);
+                } else {
+                    alert(`Registration failed: ${data.message}`);
+                }
+            } catch (error) {
+                console.error('Registration Error:', error);
+                alert('A network error occurred during registration.');
+            }
+        }
+
+        // 2. Patient Login Handler
+        async function handlePatientLogin(event) {
+            event.preventDefault();
+            const username = document.getElementById('patient-login-name').value.trim();
+            const password = document.getElementById('patient-login-password').value;
+
+            const lat = localStorage.getItem('patient_latitude');
+            const lng = localStorage.getItem('patient_longitude');
+
+            const loginBody = { username, password, role: 'patient' };
+            if (lat && lng) {
+                loginBody.location = { lat: parseFloat(lat), lng: parseFloat(lng) };
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(loginBody)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    redirectToDashboard('patient', data.username, data.token);
+                } else {
+                    alert(`Login failed: ${data.message}`);
+                }
+            } catch (error) {
+                console.error('Login Error:', error);
+                alert('A network error occurred during login.');
+            }
+        }
+
+        // 3. Hospital Login Handler - MODIFIED TO NOT SEND LOCATION
+        async function handleHospitalLogin(event) {
+            event.preventDefault();
+            const username = document.getElementById('hospital-login-id').value.trim();
+            const password = document.getElementById('hospital-login-password').value;
+            // Location inputs removed, so no variables for lat/lng are needed.
+            // The server will use the location stored in DB during registration.
+
+            const loginBody = {
+                username,
+                password,
+                role: 'hospital',
+                // Removed location object: relies on DB data
+            };
+
+            try {
+                const response = await fetch(`${API_URL}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(loginBody)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Removed location storage
+                    redirectToDashboard('hospital', data.username, data.token);
+                } else {
+                    alert(`Login failed: ${data.message}`);
+                }
+            } catch (error) {
+                console.error('Hospital Login Error:', error);
+                alert('A network error occurred during hospital login.');
+            }
+        }
+
+        // 4. Hospital Registration (uploads proof externally and registers)
+        async function uploadProof(file) {
+            // Simple local simulation: upload to a fake endpoint or return a blob URL.
+            // In production use S3/Cloudinary/your file server. Here we create an Object URL for demo.
+            if (!file) return null;
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    // e.target.result is base64 data URL (be careful for large files)
+                    // For production: POST to file storage and return the hosted URL
+                    resolve(e.target.result);
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function registerHospital(event) {
+            event.preventDefault();
+            const name = document.getElementById("hosp-name").value.trim();
+            const email = document.getElementById("hosp-email").value.trim();
+            const password = document.getElementById("hosp-pass").value;
+            const lat = document.getElementById("hosp-lat").value;
+            const lng = document.getElementById("hosp-lng").value;
+
+            if (!name || !email || !password || !lat || !lng) {
+                alert("Please ensure all fields are filled, and click 'Get Hospital Location'.");
+                return;
+            }
+
+            const proofFile = document.getElementById("hosp-proof").files[0];
+            if (!proofFile) {
+                alert("Please upload a valid proof document (image/pdf).");
+                return;
+            }
+
+            // uploadProof returns a data URL in this demo. Replace with real upload logic.
+            const proofUrl = await uploadProof(proofFile);
+
+            try {
+                const response = await fetch(`${API_URL}/register/hospital`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        name,
+                        email,
+                        password,
+                        location: { lat: parseFloat(lat), lng: parseFloat(lng) },
+                        proofUrl
+                    })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    alert(data.message + " The admin will review your submission and email you once approved.");
+                    showForm('choice-container');
+                } else {
+                    alert(`Signup failed: ${data.message}`);
+                }
+            } catch (err) {
+                console.error('Hospital registration error:', err);
+                alert('Network error during hospital registration.');
+            }
+        }
+
+    </script>
+</head>
+
+<body onload="showForm('choice-container')">
+
+    <div class="background-shapes">
+        <div class="shape shape-1"></div>
+        <div class="shape shape-2"></div>
+        <div class="shape shape-3"></div>
+    </div>
+
+    <div class="auth-wrapper">
+        <header class="app-header">
+            <h1 class="main-title"><i class="fas fa-heartbeat"></i> JEEV<span class="highlight">RAKSHAK</span></h1>
+            <p class="subtitle">Advanced Emergency Care & Management System</p>
+        </header>
+
+        <div id="choice-container" class="form-container">
+            <h2>Select Your Portal</h2>
+            <div class="role-grid">
+                <button class="submit-btn patient-btn" onclick="showForm('patient-login-container')">
+                    <div class="icon-wrapper"><i class="fas fa-user-injured"></i></div>
+                    <div class="text-wrapper">
+                        <span class="role-title">Patient Portal</span>
+                        <span class="role-desc">Access records, SOS & more</span>
+                    </div>
+                    <i class="fas fa-arrow-right arrow-icon"></i>
+                </button>
+                <button class="submit-btn hospital-btn" onclick="showForm('hospital-login-container')">
+                    <div class="icon-wrapper"><i class="fas fa-hospital-user"></i></div>
+                    <div class="text-wrapper">
+                        <span class="role-title">Hospital Staff</span>
+                        <span class="role-desc">Manage patients & resources</span>
+                    </div>
+                    <i class="fas fa-arrow-right arrow-icon"></i>
+                </button>
+            </div>
+        </div>
+
+        <div id="patient-login-container" class="form-container" style="display: none;">
+            <form class="auth-form" onsubmit="handlePatientLogin(event); return false;">
+                <h2>Welcome Back</h2>
+                <p class="form-subtitle">Patient Login</p>
+
+                <div class="input-group">
+                    <label for="patient-login-name">Username</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-user input-icon"></i>
+                        <input type="text" id="patient-login-name" required placeholder="Enter your username">
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="patient-login-password">Password</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-lock input-icon"></i>
+                        <input type="password" id="patient-login-password" required placeholder="Enter your password">
+                    </div>
+                </div>
+
+                <div class="geo-section">
+                    <button type="button" class="geo-btn" onclick="getPatientLocation('patient-login-location-status')">
+                        <i class="fas fa-map-marker-alt"></i> Update Location
+                    </button>
+                    <p id="patient-login-location-status" class="status-text">Location not set.</p>
+                </div>
+
+                <div class="action-buttons">
+                    <button type="submit" class="submit-btn patient-btn">Log In</button>
+                </div>
+
+                <div class="form-footer">
+                    <button type="button" class="back-btn" onclick="showForm('choice-container')">← Back</button>
+                    <p class="form-note">New here? <a href="#"
+                            onclick="showForm('register-container'); return false;">Create Account</a></p>
+                </div>
+            </form>
+        </div>
+
+        <div id="register-container" class="form-container" style="display: none;">
+            <form class="auth-form" onsubmit="handlePatientRegister(event); return false;">
+                <h2>Create Account</h2>
+                <p class="form-subtitle">Patient Registration</p>
+
+                <div class="input-group">
+                    <label for="patient-reg-name">Choose Username</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-user-plus input-icon"></i>
+                        <input type="text" id="patient-reg-name" required placeholder="e.g. myhealth_user">
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="patient-reg-password">Choose Password</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-lock input-icon"></i>
+                        <input type="password" id="patient-reg-password" required
+                            placeholder="Create a secure password">
+                    </div>
+                </div>
+
+                <div class="geo-section required">
+                    <button type="button" class="geo-btn" onclick="getPatientLocation('patient-reg-location-status')">
+                        <i class="fas fa-map-marker-alt"></i> Get My Location
+                    </button>
+                    <p id="patient-reg-location-status" class="status-text">Location required *</p>
+                </div>
+
+                <div class="action-buttons">
+                    <button type="submit" class="submit-btn patient-btn">Sign Up</button>
+                </div>
+
+                <div class="form-footer">
+                    <button type="button" class="back-btn" onclick="showForm('patient-login-container')">← Back to
+                        Login</button>
+                </div>
+            </form>
+        </div>
+
+        <div id="hospital-login-container" class="form-container" style="display: none;">
+            <form class="auth-form" onsubmit="handleHospitalLogin(event); return false;">
+                <h2>Staff Access</h2>
+                <p class="form-subtitle">Hospital Administration</p>
+
+                <div class="input-group">
+                    <label for="hospital-login-id">Admin ID</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-id-card-alt input-icon"></i>
+                        <input type="text" id="hospital-login-id" placeholder="Enter Staff ID">
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="hospital-login-password">Password</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-key input-icon"></i>
+                        <input type="password" id="hospital-login-password" placeholder="Enter password">
+                    </div>
+                </div>
+
+                <div class="action-buttons">
+                    <button type="submit" class="submit-btn hospital-btn">Secure Login</button>
+                </div>
+
+                <div class="form-footer">
+                    <button type="button" class="back-btn" onclick="showForm('choice-container')">← Back</button>
+                    <p class="form-note">New hospital? <a href="#"
+                            onclick="showForm('hospital-register-container'); return false;">Register here</a></p>
+                </div>
+            </form>
+        </div>
+
+        <div id="hospital-register-container" class="form-container" style="display:none;">
+            <form class="auth-form" onsubmit="registerHospital(event); return false;">
+                <h2>Hospital Registration</h2>
+                <p class="form-subtitle">Upload proof & location for verification</p>
+
+                <div class="input-group">
+                    <label for="hosp-name">Hospital Name</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-hospital input-icon"></i>
+                        <input type="text" id="hosp-name" required placeholder="e.g. Jeevrakshak General Hospital">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="hosp-email">Contact Email</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-envelope input-icon"></i>
+                        <input type="email" id="hosp-email" required placeholder="admin@hospital.example">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="hosp-pass">Create Password</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-lock input-icon"></i>
+                        <input type="password" id="hosp-pass" required placeholder="Secure password">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="hosp-proof">Upload Valid Proof (Image / PDF)</label>
+                    <input type="file" id="hosp-proof" accept="image/*,application/pdf" required>
+                </div>
+
+                <div class="geo-section required">
+                    <button type="button" class="geo-btn" onclick="getHospitalLocation('hosp-lat', 'hosp-lng')">
+                        <i class="fas fa-map-marker-alt"></i> Get Hospital Location
+                    </button>
+                    <div class="coords-row">
+                        <div class="input-group">
+                            <label for="hosp-lat">Latitude</label>
+                            <input type="number" id="hosp-lat" step="any" required readonly>
+                        </div>
+                        <div class="input-group">
+                            <label for="hosp-lng">Longitude</label>
+                            <input type="number" id="hosp-lng" step="any" required readonly>
+                        </div>
+                    </div>
+                    <p id="hosp-reg-location-status" class="status-text">Location required *</p>
+                </div>
+
+                <div class="action-buttons">
+                    <button type="submit" class="submit-btn hospital-btn">Submit for Verification</button>
+                </div>
+
+                <div class="form-footer">
+                    <button type="button" class="back-btn" onclick="showForm('choice-container')">← Back</button>
+                </div>
+            </form>
+        </div>
+
+    </div>
+
+    <!-- NEW: Location Permission Modal -->
+    <div id="location-permission-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-icon">
+                <i class="fas fa-map-marked-alt"></i>
+            </div>
+            <div class="modal-header">
+                <h3 id="loc-modal-title">Location Access</h3>
+            </div>
+            <div class="modal-body">
+                <p id="loc-modal-msg">We need your location to find nearby hospitals.</p>
+            </div>
+            <div class="modal-actions">
+                <button class="action-btn-modal btn-secondary" onclick="handleModalResponse(false)">Cancel</button>
+                <button class="action-btn-modal btn-primary" onclick="handleModalResponse(true)">Use Simulation</button>
+            </div>
+        </div>
+    </div>
+
+</body>
+
+</html>
